@@ -207,7 +207,7 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
     int medium_id;
-    fprintf(stdout, "In detect_mediums\n");
+	
     if (!ctx->enable_medium_detection){
         return;
     }
