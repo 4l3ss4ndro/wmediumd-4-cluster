@@ -717,9 +717,7 @@ int main(int argc, char *argv[])
 	free(ctx.cb);
 	free(ctx.intf);
 	free(ctx.per_matrix);
-	pthread_join(thread_n, NULL);
 	close(client_fd);
-	pthread_exit(NULL);
 	
 	return EXIT_SUCCESS;
 }
