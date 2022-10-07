@@ -103,7 +103,6 @@ bool timespec_before(struct timespec *t1, struct timespec *t2)
 
 void timespec_add_usec(struct timespec *t, int usec)
 {
-	printf("In timespec_add_usec\n");
 	t->tv_nsec += usec * 1000;
 	if (t->tv_nsec >= 1000000000) {
 		t->tv_sec++;
@@ -134,7 +133,6 @@ void rearm_timer(struct wmediumd *ctx)
 	struct station *station;
 	struct frame *frame;
 	int i;
-	printf("In rearm_timer\n");
 	bool set_min_expires = false;
 
 	/*
@@ -242,7 +240,6 @@ static double milliwatt_to_dBm(double value)
 static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 				     int duration, int signal)
 {
-	fprintf(stdout, "In set_interference_duration function\n");
 	int i, medium_id;
 
 	if (!ctx->intf)
@@ -266,7 +263,6 @@ static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 static int get_signal_offset_by_interference(struct wmediumd *ctx, int src_idx,
 					     int dst_idx)
 {
-	fprintf(stdout, "In get_signal_offset_by_interference function\n");
     int i, medium_id;
 	double intf_power;
 
@@ -309,7 +305,6 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
     int medium_id;
-    fprintf(stdout, "In detect_mediums function\n");
     if (!ctx->enable_medium_detection){
         return;
     }
@@ -367,7 +362,6 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 
 	int ack_time_usec = pkt_duration(ctx, 14, index_to_rate(0, frame->freq)) +
 			sifs;
-	fprintf(stdout, "In queue_frame function\n");
 	/*
 	 * To determine a frame's expiration time, we compute the
 	 * number of retries we might have to make due to radio conditions
@@ -386,14 +380,10 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 
 	if (is_multicast_ether_addr(dest)) {
 		deststa = NULL;
-		fprintf(stdout, "multicast TRUE\n");
 	} else {
 		deststa = get_station_by_addr(ctx, dest);
 		if (deststa) {
             w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
-                   MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
-                   MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
-            fprintf(stdout, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
                    MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
                    MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
             detect_mediums(ctx,station,deststa);
@@ -502,15 +492,12 @@ int send_to_broadcast(int sockfd_udp, int data_len, int rate_idx, int signal,
 	broad_mex.freq_tobroadcast = freq;
 	memcpy(broad_mex.hwaddr, hwaddr, ETH_ALEN);
 	memcpy(broad_mex.data_tobroadcast, data, data_len);
-	//printf("Dest Station for broadcast " MAC_FMT "\n", MAC_ARGS(station->hwaddr));
 	
 	/* Broadcast broad_mex in datagram to clients */
 	if (sendto(sockfd_udp, (mystruct_tobroadcast*)&broad_mex, sizeof(mystruct_tobroadcast), 0, (struct sockaddr *)&addr_udp, sizeof(addr_udp)) != sizeof(mystruct_tobroadcast)){
 	    fprintf(stderr, "broadcast sendto error");
 	    exit(1);
 	}
-	else
-		printf("HWSIM_CMD_FRAME broadcast sent\n");
 		
 	return 0;
 }
@@ -526,10 +513,9 @@ int send_to_local(int sock, struct frame *frame)
 	server_reply.tx_rates_count_tosend = frame->tx_rates_count;
 	memcpy(server_reply.tx_rates_tosend, frame->tx_rates, sizeof(frame->tx_rates));
 	server_reply.signal_tosend = frame->signal;
-	//sleep(2);
+
 	//Send the message back to client
 	send(sock, frame_tosend, sizeof(mystruct_frame), 0);
-	fprintf(stdout, "Tx info sent\n");
 		
 	return 0;
 }
@@ -541,9 +527,8 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 	u8 *dest = hdr->addr1;
 	u8 *src = frame->sender->addr;
 	int sock = socket_to_global;
-	
 	int rate_idx;
-	fprintf(stdout, "In deliver_frame function\n");
+	
 	if (frame->flags & HWSIM_TX_STAT_ACK) {
 		/* rx the frame on the dest interface */
 		list_for_each_entry(station, &ctx->stations, list) {
@@ -613,7 +598,6 @@ void deliver_expired_frames_queue(struct wmediumd *ctx,
 				  struct timespec *now)
 {
 	struct frame *frame, *tmp;
-	fprintf(stdout, "In deliver_expired_frames_queue function\n");
 	list_for_each_entry_safe(frame, tmp, queue, list) {
 		if (timespec_before(&frame->expires, now)) {
 			list_del(&frame->list);
@@ -631,7 +615,6 @@ void deliver_expired_frames(struct wmediumd *ctx)
 	struct list_head *l;
     int i, j, duration;
     int sta1_medium_id;
-    fprintf(stdout, "In deliver_expired_frames function\n");
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	list_for_each_entry(station, &ctx->stations, list) {
@@ -701,45 +684,28 @@ static int process_messages_cb(void *arg, mystruct_nlmsg torecv_t)
 	struct station *sender;
 	struct frame *frame;
 	
-	fprintf(stdout, "In process_messages function\n");
-	
 	if (1) {
 		pthread_rwlock_rdlock(&snr_lock);
-		fprintf(stdout, "HWSIM_CMD_FRAME received\n");
 		if (1) {
-			//fprintf(stdout, "Attributes got\n");
 			u8 *hwaddr = (u8 *)malloc(sizeof(u8)*ETH_ALEN);
-			//for(int j = 0; j < ETH_ALEN; j++)	
-			//	hwaddr[j] = torecv_t.hwaddr_t[j];
 			memcpy(hwaddr, torecv_t.hwaddr_t, ETH_ALEN);
 			unsigned int data_len = torecv_t.data_len_t;
 			unsigned int flags = torecv_t.flags_t;
 			unsigned int tx_rates_len = torecv_t.tx_rates_len_t;
 			struct hwsim_tx_rate *tx_rates = (struct hwsim_tx_rate *)malloc(sizeof(struct hwsim_tx_rate)*IEEE80211_TX_MAX_RATES);
-			//for(int j = 0; j < IEEE80211_TX_MAX_RATES; j++)
-			//	tx_rates[j] = torecv_t.tx_rates_t[j];
 			memcpy(tx_rates, torecv_t.tx_rates_t, sizeof(IEEE80211_TX_MAX_RATES));
 			u64 cookie =  torecv_t.cookie_t;
 			u32 freq = torecv_t.freq_t;
 			u8 *src = (u8 *)malloc(sizeof(u8)*ETH_ALEN);
-			//for(int j = 0; j < ETH_ALEN; j++)
-			//	src[j] = torecv_t.src_t[j];
 			memcpy(src, torecv_t.src_t, ETH_ALEN);
 			u8 *data = (u8 *)malloc(sizeof(u8)*10000);
 			memcpy(data, torecv_t.data_t, sizeof(torecv_t.data_t));
-			
-			printf("Socket data received\n");
-			
-			//printf("Sender sta " MAC_FMT "\n", MAC_ARGS(src));
 
 			sender = get_station_by_addr(ctx, src);
 			if (!sender) {
-				printf("Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
 				goto out;
 			}
-			else
-				printf("Sender sta found\n");
 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
 
 			frame = malloc(sizeof(*frame) + data_len);
@@ -757,7 +723,6 @@ static int process_messages_cb(void *arg, mystruct_nlmsg torecv_t)
 				tx_rates_len / sizeof(struct hwsim_tx_rate);
 			memcpy(frame->tx_rates, tx_rates,
 			       min(tx_rates_len, sizeof(frame->tx_rates)));
-			fprintf(stdout, "Frame queued\n");
 			queue_frame(ctx, sender, frame);
 		}
 
@@ -777,7 +742,6 @@ int send_register_msg(struct wmediumd *ctx)
 	struct nl_sock *sock = ctx->sock;
 	struct nl_msg *msg;
 	int ret;
-	fprintf(stdout, "Registering HWSIM_CMD_REGISTER...\n");
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -788,7 +752,6 @@ int send_register_msg(struct wmediumd *ctx)
 			0, NLM_F_REQUEST, HWSIM_CMD_REGISTER,
 			VERSION_NR) == NULL) {
 		w_logf(ctx, LOG_ERR, "%s: genlmsg_put failed\n", __func__);
-		fprintf(stdout, "Failing registering\n");
 		ret = -1;
 		goto out;
 	}
@@ -796,7 +759,6 @@ int send_register_msg(struct wmediumd *ctx)
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
-		fprintf(stdout, "Failing registering\n");
 		ret = -1;
 		goto out;
 	}
@@ -882,8 +844,6 @@ static void timer_cb(int fd, short what, void *data)
 {
 	struct wmediumd *ctx = data;
 	uint64_t u;
-	
-	fprintf(stdout, "In timer_cb function\n");
 
 	pthread_rwlock_rdlock(&snr_lock);
 	read(fd, &u, sizeof(u));
@@ -895,8 +855,6 @@ static void timer_cb(int fd, short what, void *data)
 
 void *connection_handler(void *socket_desc)
 {
-	fprintf(stdout, "Inside connection handler\n");
-	//Get the socket descriptor
 	int sock = *(int*)socket_desc;
 	int read_size;
 	struct wmediumd *ctx = ctx_to_pass;
@@ -907,12 +865,10 @@ void *connection_handler(void *socket_desc)
 	socket_to_global = sock;
 	
 	//Receive a message from client
-	fprintf(stdout, "Waiting for messages from client\n");
 	while(1)
 	{
 		while( (read_size = recv(sock, client_message, sizeof(mystruct_nlmsg), 0) > 0 ))
 		{
-			fprintf(stdout, "TCP message received\n");
 			process_messages_cb(ctx, torecv);
 		}
 	}
@@ -949,8 +905,6 @@ int main(int argc, char *argv[])
 	char *ip_udp = "192.168.1.255";
 	int port_udp = 8080;
 	int yes = 1;
-
-	fprintf(stdout, "In main\n");
 
 	setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
 
@@ -1099,8 +1053,6 @@ int main(int argc, char *argv[])
 	ctx_to_pass = &ctx;
 	
 	//Accept and incoming connection
-	fprintf(stdout, "Waiting for incoming TCP connections...\n");
-	
 	new_socket = accept(server_tcp, (struct sockaddr*)&address,
 				(socklen_t*)&addrlen);
 	
@@ -1109,19 +1061,15 @@ int main(int argc, char *argv[])
 		perror("TCP accept failed");
 		return 1;
 	}
-	else
-		fprintf(stdout, "TCP connection accepted\n");
 	
 	pthread_t sniffer_thread;
 	new_sock = malloc(1);
 	*new_sock = new_socket;
-	fprintf(stdout, "Creating thread for TCP messages\n");
 	
 	sleep(5);
 	
 	if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
 		{
-			fprintf(stdout, "Could not create thread\n");
 			perror("could not create thread");
 			return 1;
 		}
@@ -1137,7 +1085,6 @@ int main(int argc, char *argv[])
 	int opt_reuse = 1;
  	setsockopt(sockfd_udp, SOL_SOCKET, SO_REUSEPORT, &opt_reuse, sizeof(opt_reuse));
   
-
 	memset(&addr_udp, '\0', sizeof(addr_udp));
 	addr_udp.sin_family = AF_INET;
 	addr_udp.sin_port = htons(port_udp);
