@@ -122,7 +122,6 @@ void rearm_timer(struct wmediumd *ctx)
 	int i;
 
 	bool set_min_expires = false;
-	fprintf(stdout, "In rearm_timer function\n");
 
 	/*
 	 * Iterate over all the interfaces to find the next frame that
@@ -208,7 +207,6 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
     int medium_id;
-    fprintf(stdout, "In detect_mediums\n");
     if (!ctx->enable_medium_detection){
         return;
     }
@@ -246,7 +244,6 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_sock *sock = ctx->sock;
 	struct nl_msg *msg;
 	int ret;
-	printf("In send_tx_info_frame_nl function\n");
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -273,7 +270,6 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 			ret = -1;
 			goto out;
 	}
-	printf("Source hwaddr from Tx info: " MAC_FMT "\n", MAC_ARGS(frame->sender->hwaddr));
 
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
@@ -295,7 +291,6 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 			  u8 *data, int data_len, int rate_idx, int signal,
 			  int freq)
 {
-	printf("In send_cloned_frame_msg function\n");
 	struct nl_msg *msg;
 	struct nl_sock *sock = ctx->sock;
 	int ret;
