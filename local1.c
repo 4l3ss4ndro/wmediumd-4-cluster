@@ -49,6 +49,8 @@
 
 int socket_to_global = 0;
 struct wmediumd *ctx_to_pass;
+int first_run = 1;
+u8 sta1_adx[ETH_ALEN];
 
 static inline int div_round(int a, int b)
 {
@@ -122,6 +124,7 @@ void rearm_timer(struct wmediumd *ctx)
 	int i;
 
 	bool set_min_expires = false;
+	fprintf(stdout, "In rearm_timer function\n");
 
 	/*
 	 * Iterate over all the interfaces to find the next frame that
@@ -207,7 +210,7 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
     int medium_id;
-	
+    fprintf(stdout, "In detect_mediums\n");
     if (!ctx->enable_medium_detection){
         return;
     }
@@ -245,9 +248,11 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_sock *sock = ctx->sock;
 	struct nl_msg *msg;
 	int ret;
+	printf("In send_tx_info_frame_nl function\n");
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
+		printf("Error allocating new message\n");
 		return -1;
 	}
 
@@ -255,6 +260,7 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 			0, NLM_F_REQUEST, HWSIM_CMD_TX_INFO_FRAME,
 			VERSION_NR) == NULL) {
 		w_logf(ctx, LOG_ERR, "%s: genlmsg_put failed\n", __func__);
+		printf("genlmsg_put failed\n");
 		ret = -1;
 		goto out;
 	}
@@ -268,17 +274,80 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 		    frame->tx_rates) ||
 	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
 			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
+			printf("Failed to fill a payload\n");
 			ret = -1;
 			goto out;
 	}
+	printf("Source hwaddr from Tx info: " MAC_FMT "\n", MAC_ARGS(frame->sender->hwaddr));
 
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
+		printf("nl_send_auto failed\n");
 		ret = -1;
 		goto out;
 	}
 	ret = 0;
+	printf("Tx info frame delivered\n");
+out:
+	nlmsg_free(msg);
+	return ret;
+	printf("-1\n");
+}
+
+/*
+ * Send a data frame to the kernel for reception at a specific radio.
+ */
+int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
+			  u8 *data, int data_len, int rate_idx, int signal,
+			  int freq)
+{
+	printf("In send_cloned_frame_msg function\n");
+	struct nl_msg *msg;
+	struct nl_sock *sock = ctx->sock;
+	int ret;
+
+	msg = nlmsg_alloc();
+	if (!msg) {
+		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
+		return -1;
+	}
+
+	if (genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, ctx->family_id,
+			0, NLM_F_REQUEST, HWSIM_CMD_FRAME,
+			VERSION_NR) == NULL) {
+		w_logf(ctx, LOG_ERR, "%s: genlmsg_put failed\n", __func__);
+		printf("genlmsg failed\n");
+		ret = -1;
+		goto out;
+	}
+
+	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
+		    dst->hwaddr) ||
+	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
+	    nla_put_u32(msg, HWSIM_ATTR_RX_RATE, rate_idx) ||
+	    nla_put_u32(msg, HWSIM_ATTR_FREQ, freq) ||
+	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, signal)) {
+			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
+			printf("payload fill failed\n");
+			ret = -1;
+			goto out;
+	}
+
+	w_logf(ctx, LOG_DEBUG, "cloned msg dest " MAC_FMT " (radio: " MAC_FMT ") len %d\n",
+		   MAC_ARGS(dst->addr), MAC_ARGS(dst->hwaddr), data_len);
+	printf("cloned msg dest " MAC_FMT " (radio: " MAC_FMT ") len %d\n",
+		   MAC_ARGS(dst->addr), MAC_ARGS(dst->hwaddr), data_len);
+	ret = nl_send_auto_complete(sock, msg);
+	if (ret < 0) {
+		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
+		printf("nl send auto failed\n");
+		ret = -1;
+		goto out;
+	}
+	ret = 0;
+	printf("HWSIM_CMD_FRAME delivered\n");
+
 out:
 	nlmsg_free(msg);
 	return ret;
@@ -296,11 +365,94 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 	return NL_SKIP;
 }
 
+/*
+ * Handle events from the kernel.  Process CMD_FRAME events and queue them
+ * for later delivery with the scheduler.
+ */
+
+void *rx_cmd_frame(void *unused)
+{
+	mystruct_tobroadcast broad_mex;
+	struct wmediumd *ctx = ctx_to_pass;
+	struct station *station_udp;
+	fprintf(stdout, "Creating UDP socket...\n");
+	int port = 8080;
+
+	int sockfd_udp;
+	struct sockaddr_in server_addr_udp, client_addr_udp;
+	socklen_t addr_size_udp;
+	int n_udp;
+	
+	int machine_id = 1;
+
+	sockfd_udp = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd_udp < 0){
+	perror("UDP socket error");
+	exit(1);
+	}
+
+	memset(&server_addr_udp, '\0', sizeof(server_addr_udp));
+	server_addr_udp.sin_family = AF_INET;
+	server_addr_udp.sin_port = htons(port);
+	server_addr_udp.sin_addr.s_addr = INADDR_ANY;
+	
+	int opt_reuse = 1;
+  	setsockopt(sockfd_udp, SOL_SOCKET, SO_REUSEPORT, &opt_reuse, sizeof(opt_reuse));
+  
+	n_udp = bind(sockfd_udp, (struct sockaddr*)&server_addr_udp, sizeof(server_addr_udp));
+	if (n_udp < 0) {
+	perror("UDP bind error");
+	exit(1);
+	}
+	
+	fprintf(stdout, "Waiting for UDP message...\n");
+	//Receive from UDP broadcast
+	while(1)
+	{
+		addr_size_udp = sizeof(client_addr_udp);
+		if(recvfrom(sockfd_udp, (mystruct_tobroadcast *)&broad_mex, sizeof(mystruct_tobroadcast), 0, (struct sockaddr*)&client_addr_udp, &addr_size_udp) < 0)
+		{
+			printf("recv failed");
+		}
+		else
+		{	
+			
+			if (broad_mex.machine_id_tobroadcast != machine_id || sta1_adx == broad_mex.hwaddr)
+			{	
+				printf("UDP message received\n");
+				list_for_each_entry(station_udp, &ctx->stations, list) 
+				{
+					if (memcmp(broad_mex.hwaddr, station_udp->hwaddr, ETH_ALEN) == 0)
+					{	
+						printf("This is the station receiving the frame\n");
+						//printf("Dest Station for broadcast " MAC_FMT "\n", MAC_ARGS(station_udp->hwaddr));
+						//printf("Dest Station for broadcast " MAC_FMT "\n", MAC_ARGS(broad_mex.hwaddr));
+						send_cloned_frame_msg(ctx, station_udp,
+								      broad_mex.data_tobroadcast,
+								      broad_mex.data_len_tobroadcast,
+								      broad_mex.rate_idx_tobroadcast, 
+								      broad_mex.signal_tobroadcast,
+								      broad_mex.freq_tobroadcast);
+					}
+					else 
+					{
+						//printf("This is not the station receiving the frame\n");
+						//printf("Dest Station for broadcast " MAC_FMT "\n", MAC_ARGS(station_udp->hwaddr));
+						//printf("Dest Station for broadcast " MAC_FMT "\n", MAC_ARGS(broad_mex.hwaddr));
+					}
+				}
+			}
+		}
+	}
+	return NULL;
+}
+
 mystruct_nlmsg serialize_message_tosend(u8 *hwaddr, unsigned int data_len, unsigned int flags, unsigned int tx_rates_len, 
 				struct hwsim_tx_rate *tx_rates, u64 cookie, u32 freq, u8 *src, u8 *data)
 {
 	mystruct_nlmsg message;
 	
+	message.machine_id = 1;
 	memcpy(message.hwaddr_t, hwaddr, ETH_ALEN);
 	message.data_len_t = data_len;
 	message.flags_t = flags;
@@ -322,6 +474,8 @@ int send_to_global(int sock_w, mystruct_nlmsg *tosend)
 		puts("TCP send failed");
 		return 1;
 	}
+	else
+		printf("TCP message sent to global wmediumd\n");
 		
 	return 0;
 }
@@ -340,6 +494,7 @@ int recv_from_global(int sock_w, struct wmediumd *ctx, struct frame *frame)
 	}
 	else
 	{	
+		printf("Tx info received from global wmediumd\n");
 		frame->cookie = server_reply.cookie_tosend;
 		frame->flags = server_reply.flags_tosend;
 		frame->tx_rates_count = server_reply.tx_rates_count_tosend;
@@ -347,6 +502,7 @@ int recv_from_global(int sock_w, struct wmediumd *ctx, struct frame *frame)
 		frame->signal = server_reply.signal_tosend;
 		
 		send_tx_info_frame_nl(ctx, frame);
+		printf("Tx info message correctly received\n");
 		free(frame);
 	}
 	
@@ -366,6 +522,8 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 	/* generic netlink header*/
 	struct genlmsghdr *gnlh = nlmsg_data(nlh);
 	
+	fprintf(stdout, "In process_messages_cb function\n");
+	
 	mystruct_nlmsg message;
 	mystruct_nlmsg* tosend;
     	tosend = &message;
@@ -384,6 +542,11 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 		
 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]); 
+			//printf("Source hwaddr: " MAC_FMT "\n", MAC_ARGS(hwaddr));
+			//hwaddr[0] = hwaddr[0]&0x0f;
+			//for(int k = 0; k < ETH_ALEN; k++)
+				//printf("%02x:",hwaddr[k]);
+			//printf("\n");
 			unsigned int data_len =
 				nla_len(attrs[HWSIM_ATTR_FRAME]);
 			char *data = (char *)nla_data(attrs[HWSIM_ATTR_FRAME]); 
@@ -413,6 +576,15 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			}
 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
 			
+			//printf("Source addr: " MAC_FMT "\n", MAC_ARGS(src));
+			
+			if (first_run == 1)
+			{
+				memcpy(sta1_adx, hwaddr, ETH_ALEN);
+				first_run = 0;
+				printf("sta1_adx: " MAC_FMT "\n", MAC_ARGS(sta1_adx));
+			}
+
 			if (!frame)
 				goto out;
 				
@@ -430,9 +602,12 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 				
 			message = serialize_message_tosend(hwaddr, data_len, flags, tx_rates_len, tx_rates, cookie, freq, src, frame->data);
 			
-			send_to_global(sock_w, tosend);
-			recv_from_global(sock_w, ctx, frame);
-			
+			if (memcmp(hwaddr, sta1_adx, ETH_ALEN) == 0)
+			{
+				printf("Source addr: " MAC_FMT "\n", MAC_ARGS(src));
+				send_to_global(sock_w, tosend);
+				recv_from_global(sock_w, ctx, frame);
+			}
 		}
 out:
 		pthread_rwlock_unlock(&snr_lock);
@@ -450,6 +625,7 @@ int send_register_msg(struct wmediumd *ctx)
 	struct nl_sock *sock = ctx->sock;
 	struct nl_msg *msg;
 	int ret;
+	fprintf(stdout, "Registering HWSIM_CMD_REGISTER\n");
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -460,6 +636,7 @@ int send_register_msg(struct wmediumd *ctx)
 			0, NLM_F_REQUEST, HWSIM_CMD_REGISTER,
 			VERSION_NR) == NULL) {
 		w_logf(ctx, LOG_ERR, "%s: genlmsg_put failed\n", __func__);
+		fprintf(stdout, "Failing registering\n");
 		ret = -1;
 		goto out;
 	}
@@ -467,6 +644,7 @@ int send_register_msg(struct wmediumd *ctx)
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
+		fprintf(stdout, "Failing registering\n");
 		ret = -1;
 		goto out;
 	}
@@ -480,6 +658,7 @@ out:
 static void sock_event_cb(int fd, short what, void *data)
 {
 	struct wmediumd *ctx = data;
+	fprintf(stdout, "In sock_event_cb function\n");
 	nl_recvmsgs_default(ctx->sock);
 }
 
@@ -490,6 +669,7 @@ static int init_netlink(struct wmediumd *ctx)
 {
 	struct nl_sock *sock;
 	int ret;
+	fprintf(stdout, "In init_netlink function\n");
 	ctx->cb = nl_cb_alloc(NL_CB_CUSTOM);
 	if (!ctx->cb) {
 		w_logf(ctx, LOG_ERR, "Error allocating netlink callbacks\n");
@@ -552,6 +732,7 @@ static void timer_cb(int fd, short what, void *data)
 {
 	struct wmediumd *ctx = data;
 	uint64_t u;
+	fprintf(stdout, "In timer_cb\n");
 	pthread_rwlock_rdlock(&snr_lock);
 	read(fd, &u, sizeof(u));
 	ctx->move_stations(ctx);
@@ -567,11 +748,14 @@ int main(int argc, char *argv[])
 	char *config_file = NULL;
 	char *per_file = NULL;
 	int opt;	
+	pthread_t thread_n;
 	int sock_tcp = 0, client_fd;
 	struct sockaddr_in serv_addr;
+	fprintf(stdout, "Entering local wmediumd\n");
 	setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
 
 	if (argc == 1) {
+		fprintf(stderr, "This program needs arguments....\n\n");
 		print_help(EXIT_FAILURE);
 	}
 
@@ -633,16 +817,19 @@ int main(int argc, char *argv[])
 
 	if (full_dynamic) {
 		if (config_file) {
+			printf("%s: cannot use dynamic complex mode with config file\n", argv[0]);
 			print_help(EXIT_FAILURE);
 		}
 
 		if (!start_server) {
+			printf("%s: dynamic complex mode requires the server option\n", argv[0]);
 			print_help(EXIT_FAILURE);
 		}
 
 		w_logf(&ctx, LOG_NOTICE, "Using dynamic complex mode instead of config file\n");
 	} else {
 		if (!config_file) {
+			printf("%s: config file must be supplied\n", argv[0]);
 			print_help(EXIT_FAILURE);
 		}
 
@@ -675,16 +862,21 @@ int main(int argc, char *argv[])
 	if (send_register_msg(&ctx) == 0) {
 		w_logf(&ctx, LOG_NOTICE, "REGISTER SENT!\n");
 	}
+	fprintf(stdout, "Start wserver\n");
 	if (start_server == true)
 		start_wserver(&ctx);
 		
 	ctx_to_pass = &ctx;
 	
 	sleep(5);
-
+	
+	pthread_create(&thread_n, NULL, rx_cmd_frame, NULL);
+	fprintf(stdout, "Joining thread for UDP socket\n");
+	//pthread_join(thread_n, NULL);
 	/*Socket client opens*/
 	if ((sock_tcp = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		return -1;
+		printf("\n Socket TCP creation error \n");
+		//return -1;
 	}
 	
 	socket_to_global = sock_tcp;
@@ -696,12 +888,16 @@ int main(int argc, char *argv[])
 	// form
 	if (inet_pton(AF_INET, "192.168.1.3", &serv_addr.sin_addr)
 		<= 0) {
+		printf(
+			"\nInvalid address/ Address not supported \n");
 		return -1;
 	}
+	fprintf(stdout, "Connecting to global wmediumd...\n");
 	if ((client_fd
 		= connect(sock_tcp, (struct sockaddr*)&serv_addr,
 				sizeof(serv_addr)))
 		< 0) {
+		printf("\nConnection TCP Failed \n");
 		return -1;
 	}
 	
@@ -717,7 +913,9 @@ int main(int argc, char *argv[])
 	free(ctx.cb);
 	free(ctx.intf);
 	free(ctx.per_matrix);
+	pthread_join(thread_n, NULL);
 	close(client_fd);
+	pthread_exit(NULL);
 	
 	return EXIT_SUCCESS;
 }
