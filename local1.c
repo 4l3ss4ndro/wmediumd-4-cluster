@@ -49,8 +49,8 @@
 
 int socket_to_global = 0;
 struct wmediumd *ctx_to_pass;
-int first_run = 1;
-u8 sta1_adx[ETH_ALEN];
+//int first_run = 1;
+u8 sta1_adx[ETH_ALEN] = {0x42, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 static inline int div_round(int a, int b)
 {
@@ -578,12 +578,12 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			
 			//printf("Source addr: " MAC_FMT "\n", MAC_ARGS(src));
 			
-			if (first_run == 1)
+			/*if (first_run == 1)
 			{
 				memcpy(sta1_adx, hwaddr, ETH_ALEN);
 				first_run = 0;
 				printf("sta1_adx: " MAC_FMT "\n", MAC_ARGS(sta1_adx));
-			}
+			}*/
 
 			if (!frame)
 				goto out;
