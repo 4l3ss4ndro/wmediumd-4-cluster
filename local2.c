@@ -49,9 +49,9 @@
 
 int socket_to_global = 0;
 struct wmediumd *ctx_to_pass;
-int first_run = 1;
-u8 sta2_adx[ETH_ALEN];
-int response = 0;
+//int first_run = 1;
+u8 sta2_adx[ETH_ALEN] = {0x42, 0x00, 0x00, 0x00, 0x01, 0x00};
+//int response = 0;
 
 static inline int div_round(int a, int b)
 {
@@ -433,7 +433,7 @@ void *rx_cmd_frame(void *unused)
 								      broad_mex.rate_idx_tobroadcast, 
 								      broad_mex.signal_tobroadcast,
 								      broad_mex.freq_tobroadcast);
-						response = 1;
+						//response = 1;
 					}
 					else 
 					{
@@ -535,7 +535,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 	u8 *src;
 	int sock_w = socket_to_global;
 
-	if (gnlh->cmd == HWSIM_CMD_FRAME && response == 1) {
+	if (gnlh->cmd == HWSIM_CMD_FRAME /*&& response == 1*/) {
 		
 		pthread_rwlock_rdlock(&snr_lock);
 		/* we get the attributes*/
@@ -577,11 +577,11 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			}
 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
 			
-			if (first_run == 1)
+			/*if (first_run == 1)
 			{
 				memcpy(sta2_adx, src, ETH_ALEN);
 				first_run = 0;
-			}
+			}*/
 			
 			//printf("Source addr: " MAC_FMT "\n", MAC_ARGS(src));
 			
@@ -602,7 +602,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 				
 			message = serialize_message_tosend(hwaddr, data_len, flags, tx_rates_len, tx_rates, cookie, freq, src, frame->data);
 			
-			if (memcmp(src, sta2_adx, ETH_ALEN) == 0)
+			if (memcmp(hwaddr, sta2_adx, ETH_ALEN) == 0)
 			{
 				printf("Source addr: " MAC_FMT "\n", MAC_ARGS(src));
 				send_to_global(sock_w, tosend);
